@@ -13,7 +13,7 @@ from scipy.sparse import csr_matrix
 import argparse
 from tqdm import tqdm
 from datetime import datetime
-from utils import coarsening, load_data
+from utils import coarsening, load_data, get_logger
 
 
 
@@ -35,21 +35,60 @@ device = torch.device(('cuda:{}' if torch.cuda.is_available() else 'cpu').format
 np.random.seed(args.seed)
 torch.manual_seed(args.seed)
 
+# set up logger
+log_path = f'./log/{datetime.now().strftime("%b_%d")}'
+if not os.path.exists(log_path):
+    os.makedirs(log_path)
+log_path += f'/coarsen_FGA_{args.seed}_{args.dataset}_{args.coarsening_method}.log'
+logger = get_logger(
+    logpath=log_path,
+    filepath=os.path.abspath(__file__)
+)
+
+# Setup results
+path = f'./results/'
+if not os.path.exists(path):
+    os.makedirs(path)
+if os.path.exists(f'{path}/{args.gnn}.csv'):
+    df = pd.read_csv(f'{path}/{args.gnn}.csv')
+else:
+    df = {
+        'seed': [],
+        'dataset': [],
+        'coarsening_method': [],
+        'coarsening_rate': [],
+        'misclassification_rate': [],
+        'node_ratio_avg': [],
+        'edge_ratio_avg': [],
+        'node_ratio_std': [],
+        'edge_ratio_std': []
+    }
+    df = pd.DataFrame(df)
+df['seed'] = df['seed'].astype(int)
+
+def export(results):
+    result_df = pd.concat([df, pd.DataFrame(results)])
+    result_df.to_csv(f'{path}/{args.gnn}.csv', index=False)
+
 # Load dataset
 data = Dataset(root='./data', name=args.dataset)
 adj, features, labels = data.adj, data.features, data.labels
+if args.dataset == 'Pubmed':
+    # convert adj and features from scipy.sparse._arrays.csr_array to csr_matrix
+    adj = csr_matrix(adj)
+    features = csr_matrix(features)
 idx_train, idx_val, idx_test = data.idx_train, data.idx_val, data.idx_test
 
 num_classes = (labels.max() + 1).item()
 idx_unlabeled = np.union1d(idx_val, idx_test)
-print("adj shape: ", adj.shape)
-print("features shape: ", features.shape)
-print("labels shape: ", labels.shape)
-print("training nodes: ", idx_train.shape)
-print("validation nodes: ", idx_val.shape)
-print("test nodes: ", idx_test.shape)
-print("unlabeled nodes: ", idx_unlabeled.shape)
-print("num_classes: ", num_classes)
+logger.info(f'adj: {adj.shape} {type(adj)}')
+logger.info(f'features: {features.shape} {type(features)}')
+logger.info(f'labels: {labels.shape} {type(labels)}')
+logger.info(f'training nodes: {idx_train.shape} {type(idx_train)}')
+logger.info(f'validation nodes: {idx_val.shape} {type(idx_val)}')
+logger.info(f'test nodes: {idx_test.shape} {type(idx_test)}')
+logger.info(f'unlabeled nodes: {idx_unlabeled.shape}')
+logger.info(f'num_classes: {num_classes}')
 
 # Setup Surrogate model
 if args.gnn == 'gcn':
@@ -59,7 +98,7 @@ elif args.gnn == 'gat':
     surrogate = GAT(nfeat=features.shape[1], nclass=labels.max().item()+1,
                     nhid=8, device=device)
 else:
-    print("Model not implemented, use gcn as default")
+    logger.info("Model not implemented, use gcn as default")
     surrogate = GCN(nfeat=features.shape[1], nclass=labels.max().item()+1,
                     nhid=16, device=device)
 surrogate = surrogate.to(device)
@@ -69,55 +108,6 @@ surrogate.fit(features, adj, labels, idx_train, idx_val)
 target_node = 0
 model = FGA(surrogate, nnodes=adj.shape[0], device=device)
 model = model.to(device)
-
-
-def export(results):
-    # cehck if ./results directory exists
-    path = f'./results/{datetime.now().strftime("%b_%d")}'
-    if not os.path.exists(path):
-        os.makedirs(path)
-    # check if ./results/{args.gnn}.csv exists
-    if os.path.exists(f'{path}/{args.gnn}.csv'):
-        df = pd.read_csv(f'{path}/{args.gnn}.csv')
-        df = pd.concat([df, pd.DataFrame(results)])
-    else:
-        df = pd.DataFrame(results)
-    df.to_csv(f'{path}/{args.gnn}.csv', index=False)
-
-
-def test(adj, features, target_node):
-    ''' test on GCN '''
-    if args.gnn == 'gcn':
-        gnn = GCN(nfeat=features.shape[1],
-                nhid=16,
-                nclass=labels.max().item() + 1,
-                dropout=0.5, device=device)
-    elif args.gnn == 'gat':
-        gnn = GAT(nfeat=features.shape[1],
-                nhid=16,
-                nclass=labels.max().item() + 1,
-                dropout=0.5, device=device)
-    else:
-        print("Model not implemented, use gcn as default")
-        gnn = GCN(nfeat=features.shape[1],
-                nhid=16,
-                nclass=labels.max().item() + 1,
-                dropout=0.5, device=device)
-    if args.cuda:
-        gnn = gnn.to(device)
-
-    gnn.fit(features, adj, labels, idx_train)
-
-    gnn.eval()
-    output = gnn.predict()
-    probs = torch.exp(output[[target_node]])[0]
-    # print('probs: {}'.format(probs.detach().cpu().numpy()))
-    acc_test = accuracy(output[idx_test], labels[idx_test])
-
-    print("Test set results:",
-          "accuracy= {:.4f}".format(acc_test.item()))
-
-    return acc_test.item()
 
 
 def coarsen(poisoned_adj, features, labels, idx_train, idx_val, coarsening_rate, method=None):
@@ -139,17 +129,20 @@ def coarsen(poisoned_adj, features, labels, idx_train, idx_val, coarsening_rate,
         coarsen_poison_idx_train = coarsen_poison_idx_train.cpu().numpy()
         coarsen_poison_idx_val = torch.nonzero(coarsen_val_mask).flatten()
         coarsen_poison_idx_val = coarsen_poison_idx_val.cpu().numpy()
+        edge_ratio = coarsen_edge.shape[1] / poison_edge_index.shape[1]
+        node_ratio = coarsen_adj.shape[0] / adj.shape[0]
+
+        coarsen_labels = coarsen_labels.numpy()
+        coarsen_features = csr_matrix(coarsen_features.numpy())
     else:
-        coarsen_features = poisoned_x
-        coarsen_labels = poison_labels
-        coarsen_adj = poison_edge_index
+        coarsen_features = features
+        coarsen_labels = labels
+        coarsen_adj = poisoned_adj
         coarsen_poison_idx_train = idx_train
         coarsen_poison_idx_val = idx_val
-    edge_ratio = coarsen_edge.shape[1] / poison_edge_index.shape[1]
-    node_ratio = coarsen_adj.shape[0] / adj.shape[0]
-
-    coarsen_labels = coarsen_labels.numpy()
-    coarsen_features = csr_matrix(coarsen_features.numpy())
+        node_ratio = 1.0
+        edge_ratio = 1.0
+    
     return coarsen_adj, coarsen_features, coarsen_labels, coarsen_poison_idx_train, coarsen_poison_idx_val, node_ratio, edge_ratio
 
 
@@ -175,7 +168,7 @@ def single_test(adj, features, target_node, coarsening_rate=1.0, method=None):
                 nclass=coarsen_labels.max().item() + 1,
                 dropout=0.5, device=device)
     else:
-        print("Model not implemented, use gcn as default")
+        logger.info("Model not implemented, use gcn as default")
         gnn = GCN(nfeat=coarsen_feature.shape[1],
                 nhid=16,
                 nclass=coarsen_labels.max().item() + 1,
@@ -188,7 +181,11 @@ def single_test(adj, features, target_node, coarsening_rate=1.0, method=None):
 
     # acc_test = accuracy(output[[target_node]], labels[target_node])
     acc_test = (output.argmax(1)[target_node] == labels[target_node])
-    return acc_test.item(), node_ratio, edge_ratio
+    
+    # exclude the target node from the test set
+    idx_test_used = np.setdiff1d(idx_test, target_node)
+    clean_acc = accuracy(output[idx_test_used], labels[idx_test_used])
+    return acc_test.item(), node_ratio, edge_ratio, clean_acc.item()
 
 
 def select_nodes(target_gcn=None):
@@ -224,41 +221,6 @@ def select_nodes(target_gcn=None):
     return high + low + other
 
 
-def main():
-    u = 0 # node to attack
-    assert u in idx_unlabeled
-
-    degrees = adj.sum(0).A1
-    n_perturbations = int(degrees[u]) # How many perturbations to perform. Default: Degree of the node
-
-    model.attack(features, adj, labels, idx_train, target_node, n_perturbations)
-
-    print('=== testing GCN on original(clean) graph ===')
-    test(adj, features, target_node)
-
-    print('=== testing GCN on perturbed graph ===')
-    test(model.modified_adj, features, target_node)
-
-
-def multi_test_poison():
-    # test on 40 nodes on poisoining attack
-    cnt = 0
-    degrees = adj.sum(0).A1
-    node_list = select_nodes()
-    num = len(node_list)
-    print('=== [Poisoning] Attacking %s nodes respectively ===' % num)
-    for target_node in tqdm(node_list):
-        n_perturbations = int(degrees[target_node])
-        model = FGA(surrogate, nnodes=adj.shape[0], device=device)
-        model = model.to(device)
-        model.attack(features, adj, labels, idx_train, target_node, n_perturbations)
-        modified_adj = model.modified_adj
-        acc = single_test(modified_adj, features, target_node)
-        if acc == 0:
-            cnt += 1
-    print('misclassification rate : %s' % (cnt/num))
-
-
 def coarsen_poison():
     # test on 40 nodes on poisoining attack
     cnt = 0
@@ -273,35 +235,49 @@ def coarsen_poison():
         'coarsening_method': [],
         'coarsening_rate': [],
         'misclassification_rate': [],
+        'clean_acc_avg': [],
+        'clean_acc_std': [],
         'node_ratio_avg': [],
         'edge_ratio_avg': [],
         'node_ratio_std': [],
         'edge_ratio_std': []
     }
-    print("=== Coarsen Poison ===")
+    logger.info("=== Coarsen Poison ===")
+    count = df[(df['seed'] == args.seed) & (df['dataset'] == args.dataset) & (df['coarsening_method'] == args.coarsening_method)].shape[0]
     try:
         for coarsening_rate in coarsening_rates:
+            # logger.info(df[(df['seed'] == args.seed) & (df['dataset'] == args.dataset) & (df['coarsening_method'] == args.coarsening_method) & (df['coarsening_rate'] == coarsening_rate)])
+            if count > 0:
+                count -= 1
+                logger.info(f"Seed {args.seed} {args.dataset} {args.coarsening_method} {coarsening_rate} already exists in the results")
+                continue
             avg_node_ratio_li = []
             avg_edge_ratio_li = []
+            avg_clean_acc_li = []
+
+            logger.info(f'-----{args.coarsening_method} method with {coarsening_rate} coarsening rate-----')
             for target_node in tqdm(node_list):
                 n_perturbations = int(degrees[target_node])
                 model = FGA(surrogate, nnodes=adj.shape[0], device=device)
                 model = model.to(device)
                 model.attack(features, adj, labels, idx_train, target_node, n_perturbations)
                 modified_adj = model.modified_adj
-                acc, node_ratio, edge_ratio = single_test(modified_adj, features, target_node, coarsening_rate=coarsening_rate, method=args.coarsening_method)
+                acc, node_ratio, edge_ratio, clean_acc = single_test(modified_adj, features, target_node, coarsening_rate=coarsening_rate, method=args.coarsening_method)
                 if acc == 0:
                     cnt += 1
                 avg_node_ratio_li.append(node_ratio)
                 avg_edge_ratio_li.append(edge_ratio)
+                avg_clean_acc_li.append(clean_acc)
             
             misclassification_rate = cnt/num
-            print(f'{args.coarsening_method} method with {coarsening_rate} coarsening rate; misclassification rate : {misclassification_rate}')
+            logger.info(f'misclassification rate: {misclassification_rate}; avg clean acc: {np.mean(avg_clean_acc_li)}')
             results['seed'].append(args.seed)
             results['dataset'].append(args.dataset)
             results['coarsening_method'].append(args.coarsening_method)
             results['coarsening_rate'].append(coarsening_rate)
             results['misclassification_rate'].append(misclassification_rate)
+            results['clean_acc_avg'].append(np.mean(avg_clean_acc_li))
+            results['clean_acc_std'].append(np.std(avg_clean_acc_li))
             results['node_ratio_avg'].append(np.mean(avg_node_ratio_li))
             results['edge_ratio_avg'].append(np.mean(avg_edge_ratio_li))
             results['node_ratio_std'].append(np.std(avg_node_ratio_li))
@@ -309,14 +285,12 @@ def coarsen_poison():
             cnt = 0
         export(results)
     except Exception as e:
-        print(f"Error occured: {args.seed} {args.dataset} {args.coarsening_method}")
-        print(e)
-        print("Exporting results")
+        logger.info(f"Error occured: {args.seed} {args.dataset} {args.coarsening_method}")
+        logger.info(e)
+        logger.info("Exporting results")
         export(results)
 
 
 if __name__ == "__main__":
-    # main()
-    # multi_test_poison()
     coarsen_poison()
 
