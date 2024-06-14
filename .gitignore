@@ -3,3 +3,4 @@
 /data/
 nohup.out
 /log/
+/dao/__pycache__

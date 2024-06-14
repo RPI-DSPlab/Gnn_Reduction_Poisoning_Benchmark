@@ -1,3 +1,7 @@
+from deeprobust.graph.utils import classification_margin
+from deeprobust.graph.defense import GCN
+import numpy as np
+
 from datetime import datetime
 import torch
 import logging
@@ -10,7 +14,8 @@ def parse_args():
     parser.add_argument('--dataset', type=str, default='Cora', 
                         choices=['Cora', 'Pubmed', 'Flickr', 'Polblogs'])
     parser.add_argument('--gnn', type=str, default='gcn',
-                        choices=['gcn', 'gat'])
+                        choices=['gcn', 'gat', 'gcn_jaccard'])
+    parser.add_argument('--nhid', type=int, default=16, help='Hidden layer size.')
     parser.add_argument('--technique', type=str, default='coarsening', 
                         choices=['coarsening', 'sparsification'])
     parser.add_argument('--coarsening_method', type=str, default='variation_neighborhoods',
@@ -66,3 +71,36 @@ def setup_logger(args):
     )
 	
     return logger
+
+
+def select_nodes(clean_adj, clean_features, clean_labels, clean_idx_train, clean_idx_val, clean_idx_test, target_gcn=None, device=None):
+    '''
+    selecting nodes as reported in nettack paper:
+    (i) the 10 nodes with highest margin of classification, i.e. they are clearly correctly classified,
+    (ii) the 10 nodes with lowest margin (but still correctly classified) and
+    (iii) 20 more nodes randomly
+    '''
+
+    if target_gcn is None:
+        target_gcn = GCN(nfeat=clean_features.shape[1],
+                  nhid=16,
+                  nclass=clean_labels.max().item() + 1,
+                  dropout=0.5, device=device)
+        target_gcn = target_gcn.to(device)
+        target_gcn.fit(clean_features, clean_adj, clean_labels, clean_idx_train, clean_idx_val, patience=30)
+    target_gcn.eval()
+    output = target_gcn.predict()
+
+    margin_dict = {}
+    for idx in clean_idx_test:
+        margin = classification_margin(output[idx], clean_labels[idx])
+        if margin < 0: # only keep the nodes correctly classified
+            continue
+        margin_dict[idx] = margin
+    sorted_margins = sorted(margin_dict.items(), key=lambda x:x[1], reverse=True)
+    high = [x for x, y in sorted_margins[: 10]]
+    low = [x for x, y in sorted_margins[-10: ]]
+    other = [x for x, y in sorted_margins[10: -10]]
+    other = np.random.choice(other, 20, replace=False).tolist()
+
+    return high, other, low
