@@ -1,6 +1,8 @@
 from deeprobust.graph.utils import classification_margin
 from deeprobust.graph.defense import GCN
 import numpy as np
+from torch_geometric.datasets import Planetoid
+import torch_geometric.transforms as T
 
 from datetime import datetime
 import torch
@@ -14,10 +16,10 @@ def parse_args():
     parser.add_argument('--dataset', type=str, default='Cora', 
                         choices=['Cora', 'Pubmed', 'Flickr', 'Polblogs'])
     parser.add_argument('--gnn', type=str, default='gcn',
-                        choices=['gcn', 'gat', 'gcn_jaccard'])
+                        choices=['gcn', 'gat'])
     parser.add_argument('--nhid', type=int, default=16, help='Hidden layer size.')
     parser.add_argument('--technique', type=str, default='coarsening', 
-                        choices=['coarsening', 'sparsification'])
+                        choices=['coarsening', 'sparsification', 'jaccard', 'svd', 'rgcn', 'median', 'airgnn'])
     parser.add_argument('--coarsening_method', type=str, default='variation_neighborhoods',
                         choices=['variation_neighborhoods_degree', 'variation_neighborhoods','variation_edges_degree','variation_edges', 'variation_cliques_degree', 'variation_cliques', 'heavy_edge', 'algebraic_JC', 'kron'],
                         help="Method of coarsening")
@@ -30,6 +32,8 @@ def parse_args():
     parser.add_argument('--ratio_number', type=int, default=9, help='Number of ratios.')
 
     args = parser.parse_args()
+    if args.technique != 'coarsening' and args.technique != 'sparsification':
+        args.ratio_number = 1
     args.cuda =  not args.no_cuda and torch.cuda.is_available()
 
     return args
@@ -104,3 +108,4 @@ def select_nodes(clean_adj, clean_features, clean_labels, clean_idx_train, clean
     other = np.random.choice(other, 20, replace=False).tolist()
 
     return high, other, low
+      

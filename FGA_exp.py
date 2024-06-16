@@ -1,7 +1,8 @@
 from deeprobust.graph.targeted_attack import FGA
-from deeprobust.graph.defense import GCN, GAT
-from deeprobust.graph.utils import accuracy, classification_margin
-from deeprobust.graph.data import Dataset
+from deeprobust.graph.defense import GCN, GAT, GCNJaccard, GCNSVD, RGCN, MedianGCN
+from deeprobust.graph.defense_pyg import AirGNN
+from deeprobust.graph.utils import accuracy
+from deeprobust.graph.data import Dataset, Dpr2Pyg
 
 import os
 import numpy as np
@@ -164,6 +165,140 @@ def sparsify_poison_test(degrees, reduce_rate, target_node):
     return success, 1, edge_ratio, clean_acc
 
 
+def jaccard_poison_test(degrees, target_node):
+    success = 0
+    n_perturbations = int(degrees[target_node])
+    modified_adj = poison(n_perturbations, target_node)
+
+    model = GCNJaccard(nfeat=clean_features.shape[1],
+        nhid=args.nhid,
+        nclass=clean_labels.max().item() + 1,
+        device=device
+    )
+    model = model.to(device)
+    model.fit(clean_features, modified_adj, clean_labels, clean_idx_train, clean_idx_val, threshold=0.01, verbose=False)
+    output = model.predict(clean_features, modified_adj)
+    acc = (output.argmax(1)[target_node] == clean_labels[target_node])
+
+    if acc == 0:
+        success = 1
+    # exclude the target node from the test sets
+    idx_test_used = np.setdiff1d(clean_idx_test, target_node)
+    clean_acc = accuracy(output[idx_test_used], clean_labels[idx_test_used])
+
+    return success, -1, -1, clean_acc
+
+
+def svd_poison_test(degrees, target_node):
+    success = 0
+    n_perturbations = int(degrees[target_node])
+    modified_adj = poison(n_perturbations, target_node)
+    
+    model = GCNSVD(nfeat=clean_features.shape[1],
+        nhid=args.nhid,
+        nclass=clean_labels.max().item() + 1,
+        device=device
+    )
+    model = model.to(device)
+    model.fit(clean_features, modified_adj, clean_labels, clean_idx_train, clean_idx_val, k=15, verbose=False)
+    output = model.predict(clean_features, modified_adj)
+    acc = (output.argmax(1)[target_node] == clean_labels[target_node])
+
+    if acc == 0:
+        success = 1
+    # exclude the target node from the test sets
+    idx_test_used = np.setdiff1d(clean_idx_test, target_node)
+    clean_acc = accuracy(output[idx_test_used], clean_labels[idx_test_used])
+
+    return success, -1, -1, clean_acc
+
+
+def rgcn_poison_test(degrees, target_node):
+    success = 0
+    n_perturbations = int(degrees[target_node])
+    modified_adj = poison(n_perturbations, target_node)
+    
+    model = RGCN(
+        nnodes=modified_adj.shape[0],
+        nfeat=clean_features.shape[1],
+        nhid=32,
+        nclass=clean_labels.max().item() + 1,
+        device=device
+    )
+    model = model.to(device)
+    model.fit(clean_features, modified_adj, clean_labels, clean_idx_train, clean_idx_val, train_iters=200, verbose=False)
+    output = model.predict()
+    acc = (output.argmax(1)[target_node] == clean_labels[target_node])
+
+    if acc == 0:
+        success = 1
+    # exclude the target node from the test sets
+    idx_test_used = np.setdiff1d(clean_idx_test, target_node)
+    clean_acc = accuracy(output[idx_test_used], clean_labels[idx_test_used])
+
+    return success, -1, -1, clean_acc
+
+
+def median_gcn_poison_test(degrees, target_node):
+    success = 0
+    n_perturbations = int(degrees[target_node])
+    modified_adj = poison(n_perturbations, target_node)
+
+    model = MedianGCN(nfeat=clean_features.shape[1],
+        nhid=args.nhid,
+        nclass=clean_labels.max().item() + 1,
+        dropout=0.5, device=device)
+    model = model.to(device)
+
+    pyg_data = Dpr2Pyg(data)
+    pyg_data.update_edge_index(modified_adj)
+
+    model.fit(pyg_data=pyg_data)
+    output = model.predict()
+    acc = (output.argmax(1)[target_node] == clean_labels[target_node])
+
+    if acc == 0:
+        success = 1
+    # exclude the target node from the test sets
+    idx_test_used = np.setdiff1d(clean_idx_test, target_node)
+    clean_acc = accuracy(output[idx_test_used], clean_labels[idx_test_used])
+
+    return success, -1, -1, clean_acc
+
+
+def arignn_poison_test(degrees, target_node):
+    success = 0
+    n_perturbations = int(degrees[target_node])
+    modified_adj = poison(n_perturbations, target_node)
+
+    pyg_data = Dpr2Pyg(data)
+    pyg_data.update_edge_index(modified_adj)
+
+    model = AirGNN(
+        nfeat=clean_features.shape[1], 
+        nhid=64, 
+        dropout=0.5, 
+        with_bn=0,
+        K=10, 
+        weight_decay=5e-4, 
+        nlayers=2,
+        nclass=max(clean_labels).item()+1, 
+        device=device
+    ).to(device)
+    model.fit(pyg_data, train_iters=1000, patience=1000, verbose=True)
+    output = model.predict()
+    acc = (output.argmax(1)[target_node] == clean_labels[target_node])
+
+    if acc == 0:
+        success = 1
+    # exclude the target node from the test sets
+    idx_test_used = np.setdiff1d(clean_idx_test, target_node)
+    clean_acc = accuracy(output[idx_test_used], clean_labels[idx_test_used])
+
+    return success, -1, -1, clean_acc
+
+
+
 def exp(degrees, reduce_rate, node_li, avg_node_ratio_li, avg_edge_ratio_li, avg_clean_acc_li):
     cnt = 0
     temp_clean_acc = []
@@ -175,9 +310,34 @@ def exp(degrees, reduce_rate, node_li, avg_node_ratio_li, avg_edge_ratio_li, avg
                 target_node=target_node
             )
         elif args.technique == 'sparsification':
-            sparsify_poison_test(
+            temp_count, node_ratio, edge_ratio, clean_acc = sparsify_poison_test(
                 degrees=degrees,
                 reduce_rate=reduce_rate,
+                target_node=target_node
+            )
+        elif args.technique == 'jaccard':
+            temp_count, node_ratio, edge_ratio, clean_acc = jaccard_poison_test(
+                degrees=degrees,
+                target_node=target_node
+            )
+        elif args.technique == 'svd':
+            temp_count, node_ratio, edge_ratio, clean_acc = svd_poison_test(
+                degrees=degrees,
+                target_node=target_node
+            )
+        elif args.technique == 'rgcn':
+            temp_count, node_ratio, edge_ratio, clean_acc = rgcn_poison_test(
+                degrees=degrees,
+                target_node=target_node
+            )
+        elif args.technique == 'median':
+            temp_count, node_ratio, edge_ratio, clean_acc = median_gcn_poison_test(
+                degrees=degrees,
+                target_node=target_node
+            )
+        elif args.technique == 'airgnn':
+            temp_count, node_ratio, edge_ratio, clean_acc = arignn_poison_test(
+                degrees=degrees,
                 target_node=target_node
             )
         cnt += temp_count
@@ -224,6 +384,7 @@ def main():
             logger.info(f'-----{args.coarsening_method} method with {reduce_rate} coarsening rate-----')
         elif args.technique == 'sparsification':
             logger.info(f'-----{args.sparsification_method} method with {reduce_rate} sparsification rate-----')
+        # Robust node
         temp_cnt, hard_asr, temp_acc = exp(
             degrees=degrees,
             reduce_rate=reduce_rate,
@@ -234,6 +395,7 @@ def main():
         )
         print('hard_asr:', hard_asr, 'hard_clean_acc:', temp_acc)
         cnt += temp_cnt
+        # Random node
         temp_cnt, middle_asr, temp_acc = exp(
             degrees=degrees,
             reduce_rate=reduce_rate,
@@ -245,6 +407,7 @@ def main():
         print('middle_asr:', middle_asr, 'middle_clean_acc:', temp_acc)
         cnt += temp_cnt
         
+        # Vulnerable node
         temp_cnt, easy_asr, temp_acc = exp(
             degrees=degrees,
             reduce_rate=reduce_rate,
