@@ -187,7 +187,7 @@ def coarsen_poison(num_classes, num_nodes, poisoned_adj, features, labels, idx_t
     # convert features from csr_matrix to tensor
     poisoned_x = torch.tensor(features.todense(), dtype=torch.float)
     poison_labels = torch.tensor(labels, dtype=torch.long)
-    if method is not None and coarsening_rate < 1.0:
+    if method is not None or coarsening_rate < 1.0:
         candidate, C_list, Gc_list = coarsening(poison_edge_index, 1-coarsening_rate, method)
         coarsen_features, coarsen_train_labels, coarsen_train_mask, coarsen_val_labels, coarsen_val_mask, coarsen_edge, coarsen_labels = load_data(num_classes, candidate, C_list, Gc_list, poisoned_x, poison_labels, idx_train, idx_val, verbose=False)
         coarsen_adj = torch.zeros((coarsen_features.shape[0], coarsen_features.shape[0]))

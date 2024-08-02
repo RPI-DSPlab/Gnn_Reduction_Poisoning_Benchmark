@@ -4,3 +4,5 @@
 nohup.out
 /log/
 /dao/__pycache__
+.DS_Store
+/service/__pycache__

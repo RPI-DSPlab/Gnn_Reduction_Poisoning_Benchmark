@@ -6,7 +6,7 @@ from scipy.sparse import csr_matrix
 
 
 def sparsify(poisoned_adj, method=None, target_ratio=1.0):
-    if method is None and target_ratio >= 1.0:
+    if method is None or target_ratio >= 1.0:
         return poisoned_adj, 1
     else:
         poison_edge_index = from_scipy_sparse_matrix(poisoned_adj)[0]
