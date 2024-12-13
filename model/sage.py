@@ -4,62 +4,73 @@ import torch.nn.functional as F
 import torch.optim as optim
 import utils
 from copy import deepcopy
-from torch_geometric.nn import GCNConv, GATConv
+from torch_geometric.nn import SAGEConv
 import numpy as np
 import scipy.sparse as sp
 from torch_geometric.utils import from_scipy_sparse_matrix
 
+class GraphSage(nn.Module):
 
-class GAT(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, dropout=0.5, lr=0.01, weight_decay=5e-4, layer=2, device=None):
 
-    def __init__(self, nfeat, nhid, nclass, heads=8,dropout=0.5, lr=0.01, weight_decay=5e-4, with_relu=True, with_bias=True, self_loop=True ,device=None):
-
-        super(GAT, self).__init__()
+        super(GraphSage, self).__init__()
 
         assert device is not None, "Please specify 'device'!"
         self.device = device
         self.nfeat = nfeat
         self.hidden_sizes = [nhid]
         self.nclass = nclass
-        self.gc1 = GATConv(nfeat,nhid,heads,dropout=dropout)
-        self.gc2 = GATConv(heads*nhid, nclass, concat=False, dropout=dropout)
+        self.convs = nn.ModuleList()
+        self.convs.append(SAGEConv(nfeat, nhid))
+        for _ in range(layer-2):
+            self.convs.append(SAGEConv(nhid,nhid))
+        self.gc2 = SAGEConv(nhid, nclass)
         self.dropout = dropout
         self.lr = lr
-        if not with_relu:
-            self.weight_decay = 0
-        else:
-            self.weight_decay = weight_decay
-        self.with_relu = with_relu
-        self.with_bias = with_bias
         self.output = None
-        self.best_model = None
-        self.best_output = None
         self.edge_index = None
         self.edge_weight = None
-        self.features = None
+        self.features = None 
+        self.weight_decay = weight_decay
 
-    def forward(self, x, edge_index, edge_weight=None): 
-        x = F.dropout(x, p=self.dropout, training=self.training)    # optional
-        # x = F.elu(self.gc1(x, edge_index, edge_weight))   # may apply later 
-        x = F.elu(self.gc1(x, edge_index))
-        x = F.dropout(x, self.dropout, training=self.training)
-        # x = self.gc2(x, edge_index, edge_weight)
+    def forward(self, x, edge_index, edge_weight=None):
+        for conv in self.convs:
+            x = F.relu(conv(x, edge_index))
+            x = F.dropout(x, self.dropout, training=self.training)
         x = self.gc2(x, edge_index)
         return F.log_softmax(x,dim=1)
+    def get_h(self, x, edge_index):
 
-    def initialize(self):
-        """Initialize parameters of GCN.
+        for conv in self.convs:
+            x = F.relu(conv(x, edge_index))
+        
+        return x
+
+    def fit(self, features, edge_index, edge_weight, labels, idx_train, idx_val=None, train_iters=200, verbose=False):
+        """Train the gcn model, when idx_val is not None, pick the best model according to the validation loss.
+        Parameters
+        ----------
+        features :
+            node features
+        adj :
+            the adjacency matrix. The format could be torch.tensor or scipy matrix
+        labels :
+            node labels
+        idx_train :
+            node training indices
+        idx_val :
+            node validation indices. If not given (None), GCN training process will not adpot early stopping
+        train_iters : int
+            number of training epochs
+        initialize : bool
+            whether to initialize parameters before training
+        verbose : bool
+            whether to show verbose logs
         """
-        self.gc1.reset_parameters()
-        self.gc2.reset_parameters()
 
-    def fit(self, features, edge_index, edge_weight, labels, idx_train, idx_val=None, train_iters=200, initialize=True, verbose=False):
-        if initialize:
-            self.initialize()
         self.edge_index, self.edge_weight = edge_index, edge_weight
-        self.features = features
-        self.labels = torch.tensor(labels, dtype=torch.long)
-
+        self.features = features.to(self.device)
+        self.labels = labels.to(self.device)
 
         if idx_val is None:
             self._train_without_val(self.labels, idx_train, train_iters, verbose)
@@ -101,7 +112,7 @@ class GAT(nn.Module):
 
 
             self.eval()
-            output = self.forward(self.features, self.edge_index,self.edge_weight)
+            output = self.forward(self.features, self.edge_index, self.edge_weight)
             loss_val = F.nll_loss(output[idx_val], labels[idx_val])
             acc_val = utils.accuracy(output[idx_val], labels[idx_val])
             
@@ -132,10 +143,10 @@ class GAT(nn.Module):
         #       "loss= {:.4f}".format(loss_test.item()),
         #       "accuracy= {:.4f}".format(acc_test.item()))
         return float(acc_test)
+    
     def test_with_correct_nodes(self, features, edge_index, edge_weight, labels,idx_test):
         self.eval()
         output = self.forward(features, edge_index, edge_weight)
         correct_nids = (output.argmax(dim=1)[idx_test]==labels[idx_test]).nonzero().flatten()   # return a tensor
         acc_test = utils.accuracy(output[idx_test], labels[idx_test])
         return acc_test,correct_nids
-    

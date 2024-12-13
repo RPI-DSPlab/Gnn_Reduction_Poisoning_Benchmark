@@ -5,6 +5,67 @@ from torch_geometric.utils.convert import from_scipy_sparse_matrix
 from scipy.sparse import csr_matrix
 
 
+def sparsify_score(poisoned_adj, method=None, target_ratio=1.0):
+    if method is None or target_ratio >= 1.0:
+        return poisoned_adj, 1
+    else:
+        poison_edge_index = from_scipy_sparse_matrix(poisoned_adj)[0]
+        print(poison_edge_index.shape)
+        G = nk.graph.Graph(weighted=True)
+        G.addNodes(poisoned_adj.shape[0])
+        check = set()
+        for i in range(poison_edge_index.shape[1]):
+            # print(poison_edge_index[0, i].item(), poison_edge_index[1, i].item())
+            # print(poison_edge_index[0, i], poison_edge_index[1, i])
+            if (poison_edge_index[0, i].item(), poison_edge_index[1, i].item()) not in check:
+                G.addEdge(poison_edge_index[0, i].item(), poison_edge_index[1, i].item())
+                check.add((poison_edge_index[0, i].item(), poison_edge_index[1, i].item()))
+                check.add((poison_edge_index[1, i].item(), poison_edge_index[0, i].item()))
+        # print(f"Original graph: {G.numberOfNodes()} nodes, {G.numberOfEdges()} edges")
+        G.indexEdges()
+        print('num of edges:', G.numberOfEdges())
+        if method == "local_degree":
+            lds = nk.sparsification.LocalDegreeScore(G)
+            lds.run()
+
+            ldsScores = lds.scores()
+            ldsScores = np.array(ldsScores)
+
+
+            sort_idx = np.argsort(ldsScores)
+            print(ldsScores.shape, ldsScores[sort_idx[:5]])
+            
+
+
+def reverse_sparsify(poisoned_adj, method=None, target_ratio=1.0):
+    if method is None or target_ratio >= 1.0:
+        return poisoned_adj, 1
+    else:
+        poison_edge_index = from_scipy_sparse_matrix(poisoned_adj)[0]
+        print(poison_edge_index.shape)
+        G = nk.graph.Graph(weighted=True)
+        G.addNodes(poisoned_adj.shape[0])
+        check = set()
+        for i in range(poison_edge_index.shape[1]):
+            # print(poison_edge_index[0, i].item(), poison_edge_index[1, i].item())
+            # print(poison_edge_index[0, i], poison_edge_index[1, i])
+            if (poison_edge_index[0, i].item(), poison_edge_index[1, i].item()) not in check:
+                G.addEdge(poison_edge_index[0, i].item(), poison_edge_index[1, i].item())
+                check.add((poison_edge_index[0, i].item(), poison_edge_index[1, i].item()))
+                check.add((poison_edge_index[1, i].item(), poison_edge_index[0, i].item()))
+        # print(f"Original graph: {G.numberOfNodes()} nodes, {G.numberOfEdges()} edges")
+        G.indexEdges()
+        print('num of edges:', G.numberOfEdges())
+        if method == "local_degree":
+            lds = nk.sparsification.LocalDegreeScore(G)
+            lds.run()
+
+            ldsScores = lds.scores()
+
+            ldsScores = sorted(ldsScores, key=lambda x: x[1], reverse=True)
+            print(len(ldsScores), ldsScores[:5])
+
+
 def sparsify(poisoned_adj, method=None, target_ratio=1.0):
     if method is None or target_ratio >= 1.0:
         return poisoned_adj, 1

@@ -1,0 +1,14 @@
+LICENSE
+README.md
+setup.py
+graph_coarsening/__init__.py
+graph_coarsening/coarsening_utils.py
+graph_coarsening/graph_lib.py
+graph_coarsening/graph_utils.py
+graph_coarsening/maxWeightMatching.py
+graph_coarsening/version.py
+graph_coarsening.egg-info/PKG-INFO
+graph_coarsening.egg-info/SOURCES.txt
+graph_coarsening.egg-info/dependency_links.txt
+graph_coarsening.egg-info/requires.txt
+graph_coarsening.egg-info/top_level.txt

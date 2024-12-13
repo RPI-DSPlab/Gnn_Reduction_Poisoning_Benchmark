@@ -167,6 +167,7 @@ class GCN(nn.Module):
             self.initialize()
 
         if type(adj) is not torch.Tensor:
+            print(type(adj))
             features, adj, labels = utils.to_tensor(features, adj, labels, device=self.device)
         else:
             features = features.to(self.device)
@@ -340,3 +341,4 @@ class GCN(nn.Module):
             else:
                 self.adj_norm = utils.normalize_adj_tensor(adj)
             return self.forward(self.features, self.adj_norm)
+        
