@@ -1,4 +1,3 @@
-# GNN Poisoning
 This repository contains python experiments for the paper "**Understanding the Impact of Graph Reduction on Adversarial Robustness in Graph Neural Networks**". Please see our paper ([arXiv](https://arxiv.org/abs/2412.05883)) for more details.
 
 ## Abstract
