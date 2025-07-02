@@ -15,7 +15,6 @@ import os
 from tqdm import tqdm
 
 from service.coarsen import coarsen_poison_mapping
-from service.eval import calc_acc
 from service.poison import poison
 
 from deeprobust.graph.defense import GCN
@@ -42,7 +41,7 @@ parser.add_argument('--ptb_rate', type=float, default=0.05,  help='pertubation r
 parser.add_argument('--model', type=str, default='Meta-Self',
         choices=['Meta-Self', 'A-Meta-Self', 'Meta-Train', 'A-Meta-Train'], help='Mettack model variant')
 
-parser.add_argument('--attack', type=str, default='mettack', choices=['dice', 'mettack', 'prbcd', 'nea', 'pgd'], help='attack')
+parser.add_argument('--attack', type=str, default='mettack', choices=['dice', 'mettack', 'prbcd', 'nea', 'pgd', 'strg', 'grad'], help='attack')
 parser.add_argument('--reduction', type=str, default='coarsening', 
                     choices=['coarsening', 'sparsification'], help='reduction')
 parser.add_argument('--coarsening_method', type=str, default='variation_neighborhoods',
@@ -111,7 +110,7 @@ def main(results):
     surrogate = surrogate.to(device)
     surrogate.fit(features, adj, labels, idx_train, idx_val)
 
-    modified_adj = poison(args.attack, adj, features, labels, surrogate, data, 
+    modified_adj = poison(args, args.attack, adj, features, labels, surrogate, data, 
                           idx_train, idx_test, idx_unlabeled, 
                           perturbations, ptb_rate=args.ptb_rate, lambda_=lambda_, device=device)
 
@@ -184,6 +183,8 @@ def main(results):
     results['poison_feature_distance'] += poison_distance_li
     results['clean_label_diff'] += label_diff_li
     results['poison_label_diff'] += poison_label_diff_li
+
+    return results
 
 
 if __name__ == '__main__':

@@ -3,14 +3,17 @@ from deeprobust.graph.global_attack import Metattack
 from deeprobust.graph.global_attack import DICE
 from deeprobust.graph.global_attack import NodeEmbeddingAttack
 from deeprobust.graph.global_attack import PGDAttack
+from attack.STRG import compute_lambda, heuristic_attack
+from attack.GraD import GraD
 
 from scipy.sparse import csr_matrix
+from deeprobust.graph.utils import *
 
 import torch
 import numpy as np
 
 
-def poison(attack_name, adj, features, labels, surrogate, data, 
+def poison(args, attack_name, adj, features, labels, surrogate, data, 
            idx_train, idx_test, idx_unlabeled, 
            perturbations, ptb_rate=0.05, lambda_=0, device=None):
     """
@@ -63,5 +66,27 @@ def poison(attack_name, adj, features, labels, surrogate, data,
         modified_adj = model.modified_adj
         modified_adj = modified_adj.detach().cpu().numpy()
         modified_adj = csr_matrix(modified_adj)
+    elif attack_name == 'strg':
+        adj = sparse_mx_to_torch_sparse_tensor(adj)
+        adj = adj.to_dense()
+        adj = adj.to(device)
+        lambda_1, lambda_2, lambda_3 = compute_lambda(adj, idx_train, idx_unlabeled)
+        modified_adj = heuristic_attack(adj, labels, perturbations, idx_train, idx_unlabeled, lambda_1, lambda_2)
+
+        modified_adj = csr_matrix(modified_adj.detach().cpu().numpy())
+    elif attack_name == 'grad':
+        attack_model = GraD(nfeat=features.shape[1], hidden_sizes=[args.hidden],
+                        nnodes=adj.shape[0], nclass=labels.max().item()+1, dropout=0.5,
+                        train_iters=100, attack_features=False, lambda_=0, device=device, args=args)
+        attack_model = attack_model.to(device)
+        
+        adj = sparse_mx_to_torch_sparse_tensor(adj)
+        adj = adj.to(device)
+        features = torch.FloatTensor(features.todense()).to(device)
+        labels = torch.LongTensor(labels).to(device)
+        
+        modified_adj = attack_model(features, adj, labels, idx_train,
+                            idx_unlabeled, perturbations)
+        modified_adj = csr_matrix(modified_adj.detach().cpu().numpy())
     
     return modified_adj

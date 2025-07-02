@@ -43,15 +43,9 @@ parser.add_argument('--ptb_rate', type=float, default=0.05,  help='pertubation r
 parser.add_argument('--model', type=str, default='Meta-Self',
         choices=['Meta-Self', 'A-Meta-Self', 'Meta-Train', 'A-Meta-Train'], help='Mettack model variant')
 
-parser.add_argument('--attack', type=str, default='mettack', choices=['dice', 'mettack', 'prbcd', 'nea', 'pgd'], help='attack')
+parser.add_argument('--attack', type=str, default='mettack', choices=['dice', 'mettack', 'prbcd', 'nea', 'pgd', 'strg', 'grad'], help='attack')
 parser.add_argument('--reduction', type=str, default='coarsening', 
                     choices=['coarsening', 'sparsification'], help='reduction')
-parser.add_argument('--coarsening_method', type=str, default='variation_neighborhoods',
-                    choices=['variation_neighborhoods_degree', 'variation_neighborhoods','variation_edges_degree','variation_edges', 'variation_cliques_degree', 'variation_cliques', 'heavy_edge', 'algebraic_JC', 'kron'],
-                    help="Method of coarsening")
-parser.add_argument('--sparsification_method', type=str, default='random_node_edge',
-                    choices=['random_node_edge', 'random_edge', 'local_degree', 'forest_fire', 'local_similarity', 'scan', 'simmelian'],
-                    help="Method of sparsification")
 parser.add_argument('--device_id', type=int, default=0, help='Device ID')
 
 args = parser.parse_args()
@@ -120,7 +114,7 @@ def main(results):
     print('clean acc:', clean_acc)
     results['clean_acc'].append(clean_acc)
 
-    modified_adj = poison(args.attack, adj, features, labels, surrogate, data, 
+    modified_adj = poison(args, args.attack, adj, features, labels, surrogate, data, 
                           idx_train, idx_test, idx_unlabeled, 
                           perturbations, ptb_rate=args.ptb_rate, lambda_=lambda_, device=device)
     poison_acc = calc_acc(args, modified_adj, features, labels,
@@ -129,6 +123,12 @@ def main(results):
                           test_gnn='gcn', device=device)
     print('poison acc:', poison_acc)
     results['poison_acc'].append(poison_acc)
+    evasion_acc = calc_acc(args, adj, features, labels,
+                          idx_train, idx_val, 
+                          modified_adj, features, labels, idx_test, 
+                          test_gnn='gcn', device=device)
+    print('evasion acc:', evasion_acc)
+    results['evasion_acc'].append(evasion_acc)
     
     print('-'*10)
     original_edge_index = from_scipy_sparse_matrix(adj)[0]

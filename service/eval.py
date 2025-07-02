@@ -4,6 +4,7 @@ from model.gnn_guard import GNNGuard
 from model.median_gcn import MedianGCN
 from model.sage import GraphSage
 from model.gat import GAT
+from model.strg import STRG
 
 from deeprobust.graph.utils import accuracy
 from torch_geometric.utils.convert import from_scipy_sparse_matrix
@@ -22,6 +23,15 @@ def calc_acc(args, train_adj, train_feature, train_label,
         gcn = gcn.to(device)
         gcn.fit(train_feature, train_adj, train_label, train_idx_train, train_idx_val)
 
+        gcn.eval()
+        output = gcn.predict(predict_feature, predict_adj)
+    elif test_gnn == 'strg':
+        gcn = STRG(nfeat=train_feature.shape[1],
+              nhid=args.hidden,
+              nclass=train_label.max().item() + 1,
+              dropout=args.dropout, device=device)
+        gcn = gcn.to(device)
+        gcn.fit(train_feature, train_adj, train_label, train_idx_train, train_idx_val)
         gcn.eval()
         output = gcn.predict(predict_feature, predict_adj)
     elif test_gnn == 'gnnguard':
@@ -121,4 +131,34 @@ def calc_acc(args, train_adj, train_feature, train_label,
         output = gcn.predict(predict_feature, predict_adj)
     
     acc_test = accuracy(output[predict_idx_test], predict_label[predict_idx_test])
+    return acc_test.item()
+
+
+
+def eval_gnn(gcn, adj, features, labels, idx_test, args, test_gnn='gcn', device='cpu'):
+    gcn.eval()
+    if test_gnn == 'median':
+        features_tensor = torch.FloatTensor(features.todense()).to(device)
+        edge_index, edge_weight = from_scipy_sparse_matrix(adj)
+        edge_index = edge_index.to(device)
+
+        output = gcn(features_tensor, edge_index)
+    elif test_gnn == 'sage':
+        features_tensor = torch.FloatTensor(features.todense()).to(device)
+        edge_index, edge_weight = from_scipy_sparse_matrix(adj)
+        edge_index = edge_index.to(device)
+        edge_weight = edge_weight.to(device)
+
+        output = gcn(features_tensor, edge_index, edge_weight)
+    elif test_gnn == 'gat':
+        features_tensor = torch.FloatTensor(features.todense()).to(device)
+        edge_index, edge_weight = from_scipy_sparse_matrix(adj)
+        edge_index = edge_index.to(device)
+        edge_weight = edge_weight.to(device)
+
+        output = gcn(features_tensor, edge_index, edge_weight)
+    else:
+        output = gcn.predict(features, adj)
+
+    acc_test = accuracy(output[idx_test], labels[idx_test])
     return acc_test.item()
