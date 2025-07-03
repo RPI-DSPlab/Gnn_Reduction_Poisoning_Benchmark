@@ -14,16 +14,27 @@ pip install .
 
 ## Experiments
 * `PoisonACC.py` evaluates the impact of graph reduction on the robustness of various GNN architectures against poisoning attacks, including DICE, NEA, PGD, Mettack, PRBCD, STRG-Heuristic, and GraD.
+
 e.g. `python3 PoisonACC.py --dataset cora --attack dice --ptb_rate 0.05 --reduction sparsification`
+
 * `PoisonACC_FMA.py` evaluates the impact of graph reduction on the robustness of various GNN architectures against feature modification evasion attack, namely, InfMax.
+
 e.g. `python3 PoisonACC_FMA.py --dataset cora --reduction sparsification`
+
 * `PoisonACC_GIA.py` evaluates the impact of graph reduction on the robustness of various GNN architectures against Graph Injection Attack, namely, AGIA.
+
 e.g. `python3 PoisonACC_GIA.py --dataset cora --reduction sparsification`
+
 * `add_remove_evasion` evaluates the number of edges an attack added and removed, and the corresponding poisoned accuracies.
+
 e.g. `python3 add_remove_evasion.py --dataset cora --attack dice`
+
 * `analysis_removal_ratio.py` evaluates how much newly added perturbation edges are removed by graph reduction methods.
+
 e.g. `python3 analysis_removal_ratio.py --dataset cora --attack dice --reduction sparsification`
+
 * `analysis_coarsening.py` evaluates the feature distance and label difference ratio change between the clean coarsened graph and the poisoned coarsened graph.
+
 e.g. `python3 analysis_coarsening.py --dataset cora --attack dice`
 
 ## Reference
